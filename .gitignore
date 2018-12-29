@@ -1,0 +1,6 @@
+tags
+*.swp
+*.d
+*.o
+*.so
+*.dylib

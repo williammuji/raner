@@ -1,0 +1,27 @@
+language: cpp
+sudo: required
+dist: xenial 
+compiler:
+  - gcc
+  - clang
+os:
+  - linux
+addons:
+  apt:
+    sources:
+    # add PPAs with more up-to-date toolchains
+    - ubuntu-toolchain-r-test
+    packages:
+    # install toolchains
+    - g++-7
+before_install:
+  - ./install-package.sh
+env:
+  - BUILD_TYPE=debug
+  - BUILD_TYPE=release
+script:
+  - if [ "$CXX" == "clang++" ]; then patch -p1 < clang.diff; else sed -i 's/g++/g++-7/' CMakeLists.txt; fi
+  - g++-7 -v
+  - clang++ -v
+  - grep CXX_COMPILER CMakeLists.txt
+  - ./build.sh
