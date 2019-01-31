@@ -42,11 +42,11 @@ class Time {
   std::string ToFormattedString(bool show_microseconds) const;
 
   // Assignment operators.
-  Time &operator+=(Duration d) {
+  Time& operator+=(Duration d) {
     rep_ += d;
     return *this;
   }
-  Time &operator-=(Duration d) {
+  Time& operator-=(Duration d) {
     rep_ -= d;
     return *this;
   }
@@ -75,6 +75,10 @@ inline Time operator+(Time lhs, Duration rhs) { return lhs += rhs; }
 inline Time operator+(Duration lhs, Time rhs) { return rhs += lhs; }
 inline Time operator-(Time lhs, Duration rhs) { return lhs -= rhs; }
 inline Duration operator-(Time lhs, Time rhs) { return lhs.rep_ - rhs.rep_; }
+
+inline int64_t durationSeconds(Duration d) {
+  return std::chrono::duration_cast<std::chrono::seconds>(d).count();
+}
 
 }  // namespace raner
 

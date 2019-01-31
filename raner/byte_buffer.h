@@ -95,7 +95,7 @@ class ByteBuffer {
   }
 
   void Write(const char *data, size_t len) {
-    ensureWritableBytes(len);
+    EnsureWritableBytes(len);
     std::copy(data, data + len, BeginWrite());
     SkipWriteBytes(len);
   }
@@ -189,9 +189,14 @@ class ByteBuffer {
 
   void Shrink() {
     ByteBuffer other;
-    other.ensureWritableBytes(ReadableBytes());
+    other.EnsureWritableBytes(ReadableBytes());
     other.Write(ToStringView());
     Swap(other);
+  }
+
+  void EnsureWritableBytes(size_t len) {
+    if (WritableBytes() < len) expandCapacity(len);
+    assert(WritableBytes() >= len);
   }
 
   ssize_t ReadFD(int fd, int *save_errno);
@@ -199,11 +204,6 @@ class ByteBuffer {
  private:
   char *begin() { return &*buffer_.begin(); }
   const char *begin() const { return &*buffer_.begin(); }
-
-  void ensureWritableBytes(size_t len) {
-    if (WritableBytes() < len) expandCapacity(len);
-    assert(WritableBytes() >= len);
-  }
 
   void expandCapacity(size_t len) {
     if (WritableBytes() + DiscardableBytes() < len) {

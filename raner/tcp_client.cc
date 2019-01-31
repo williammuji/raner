@@ -59,11 +59,14 @@ TCPClient::~TCPClient() {
       conn->ForceClose();
     }
   } else {
-    Stop();
+    if (state_ == kConnecting) {
+      setState(kDisconnected);
+      loop_->epoll_server()->UnregisterFD(socket_->fd());
+    }
   }
 }
 
-void TCPClient::Start() {
+void TCPClient::Connect() {
   // FIXME: check state
   LOG(INFO) << "TCPClient::connect[" << name_ << "] - connecting to " << host_
             << ":" << port_;
@@ -73,7 +76,7 @@ void TCPClient::Start() {
 
 void TCPClient::Stop() {
   connect_ = false;
-  loop_->QueueInLoop(std::bind(&TCPClient::stopInLoop, this));
+  loop_->QueueInLoop(std::bind(&TCPClient::stopInLoop, shared_from_this()));
 }
 
 void TCPClient::Disconnect() {
@@ -136,7 +139,8 @@ void TCPClient::retry() {
               << " in " << retry_interval_ms_ << " milliseconds. ";
 
     if (!reconnect_timer_) {
-      reconnect_timer_ = loop_->CreateTimer(std::bind(&TCPClient::Start, this));
+      reconnect_timer_ =
+          loop_->CreateTimer(std::bind(&TCPClient::Connect, this));
     }
     reconnect_timer_->Update(Time::Now() + Duration(retry_interval_ms_ * 1000));
     retry_interval_ms_ = std::min(retry_interval_ms_ * 2, kMaxRetryIntervalMs);

@@ -25,7 +25,7 @@ class TCPClient : public std::enable_shared_from_this<TCPClient>,  // FIXME
             std::string_view name);
   ~TCPClient();  // force out-line dtor, for std::unique_ptr members.
 
-  void Start();
+  void Connect();
   void Disconnect();
   void Stop();
 

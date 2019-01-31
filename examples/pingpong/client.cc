@@ -1,10 +1,10 @@
 #include "raner/tcp_client.h"
 
+#include <glog/logging.h>
+#include <thread>
 #include "raner/epoll_server.h"
 #include "raner/event_loop.h"
 #include "raner/event_loop_thread_pool.h"
-#include <glog/logging.h>
-#include <thread>
 
 #include <atomic>
 #include <utility>
@@ -17,16 +17,19 @@ using namespace raner;
 class Client;
 
 class Session {
-public:
+ public:
   Session(EventLoop *loop, std::string_view ip, int port, std::string_view name,
           Client *owner)
-      : client_(loop, ip, port, name), owner_(owner), bytes_read_(0),
-        bytes_written_(0), messages_read_(0) {
+      : client_(loop, ip, port, name),
+        owner_(owner),
+        bytes_read_(0),
+        bytes_written_(0),
+        messages_read_(0) {
     client_.SetConnectionCallback(std::bind(&Session::onConnection, this, _1));
     client_.SetMessageCallback(std::bind(&Session::onMessage, this, _1, _2));
   }
 
-  void Start() { client_.Start(); }
+  void Start() { client_.Connect(); }
 
   void Stop() { client_.Disconnect(); }
 
@@ -34,7 +37,7 @@ public:
 
   int64_t messages_read() const { return messages_read_; }
 
-private:
+ private:
   void onConnection(const TCPConnectionPtr &conn);
 
   void onMessage(const TCPConnectionPtr &conn, ByteBuffer *buf) {
@@ -54,89 +57,88 @@ private:
 };
 
 class Client {
-public:
-  Client(EventLoop* loop, std::string_view ip, int port, int block_size,
+ public:
+  Client(EventLoop *loop, std::string_view ip, int port, int block_size,
          int session_count, int timeout, int thread_count)
       : loop_(loop),
         thread_pool_(loop, "pingpong-client"),
         session_count_(session_count),
         timeout_(timeout),
         num_connected_(0),
-        timeout_timer_(loop->CreateTimer(std::bind(&Client::HandleTimeout, this))) {
+        timeout_timer_(
+            loop->CreateTimer(std::bind(&Client::HandleTimeout, this))) {
     timeout_timer_->Update(Time::Now() + Duration(timeout_ * 1000 * 1000));
     if (thread_count > 1) {
-    thread_pool_.SetThreadNum(thread_count);
+      thread_pool_.SetThreadNum(thread_count);
     }
     thread_pool_.Start();
 
     for (int i = 0; i < block_size; ++i) {
-    message_.push_back(static_cast<char>(i % 128));
+      message_.push_back(static_cast<char>(i % 128));
     }
 
     for (int i = 0; i < session_count; ++i) {
-    char buf[32];
-    snprintf(buf, sizeof buf, "C%05d", i);
-    Session *session =
-        new Session(thread_pool_.GetNextLoop(), ip, port, buf, this);
-    session->Start();
-    sessions_.emplace_back(session);
+      char buf[32];
+      snprintf(buf, sizeof buf, "C%05d", i);
+      Session *session =
+          new Session(thread_pool_.GetNextLoop(), ip, port, buf, this);
+      session->Start();
+      sessions_.emplace_back(session);
     }
-}
-
-const std::string& message() const {
-  return message_;
-}
-
-void OnConnect() {
-  ++num_connected_;
-  if (num_connected_ == session_count_) {
-    LOG(WARNING) << "all connected";
   }
-}
 
-void OnDisconnect(const TCPConnectionPtr &conn) {
-  --num_connected_;
-  if (num_connected_ == 0) {
-    LOG(WARNING) << "all disconnected";
+  const std::string &message() const { return message_; }
 
-    int64_t total_bytes_read = 0;
-    int64_t total_message_read = 0;
-    for (const auto &session : sessions_) {
-      total_bytes_read += session->bytes_read();
-      total_message_read += session->messages_read();
+  void OnConnect() {
+    ++num_connected_;
+    if (num_connected_ == session_count_) {
+      LOG(WARNING) << "all connected";
     }
-    LOG(WARNING) << total_bytes_read << " total bytes read";
-    LOG(WARNING) << total_message_read << " total messages read";
-    LOG(WARNING) << static_cast<double>(total_bytes_read) /
-                        static_cast<double>(total_message_read)
-                 << " average message size";
-    LOG(WARNING) << static_cast<double>(total_bytes_read) /
-                        (timeout_ * 1024 * 1024)
-                 << " MiB/s throughput";
-    conn->GetLoop()->QueueInLoop(std::bind(&Client::quit, this));
   }
-}
 
-void HandleTimeout() {
-  LOG(WARNING) << "stop";
-  for (auto &session : sessions_) {
-    session->Stop();
+  void OnDisconnect(const TCPConnectionPtr &conn) {
+    --num_connected_;
+    if (num_connected_ == 0) {
+      LOG(WARNING) << "all disconnected";
+
+      int64_t total_bytes_read = 0;
+      int64_t total_message_read = 0;
+      for (const auto &session : sessions_) {
+        total_bytes_read += session->bytes_read();
+        total_message_read += session->messages_read();
+      }
+      LOG(WARNING) << total_bytes_read << " total bytes read";
+      LOG(WARNING) << total_message_read << " total messages read";
+      LOG(WARNING) << static_cast<double>(total_bytes_read) /
+                          static_cast<double>(total_message_read)
+                   << " average message size";
+      LOG(WARNING) << static_cast<double>(total_bytes_read) /
+                          (timeout_ * 1024 * 1024)
+                   << " MiB/s throughput";
+      conn->GetLoop()->QueueInLoop(std::bind(&Client::quit, this));
+    }
   }
-}
 
-private:
-void quit() { loop_->QueueInLoop(std::bind(&EventLoop::Quit, loop_)); }
+  void HandleTimeout() {
+    LOG(WARNING) << "stop";
+    for (auto &session : sessions_) {
+      session->Stop();
+    }
+  }
 
-EventLoop *loop_;
-EventLoopThreadPool thread_pool_;
-int session_count_;
-int timeout_;
-std::vector<std::unique_ptr<Session>> sessions_;
-std::string message_;
-std::atomic_int32_t num_connected_;
-std::unique_ptr<EpollTimer> timeout_timer_;
+ private:
+  void quit() { loop_->QueueInLoop(std::bind(&EventLoop::Quit, loop_)); }
 
-DISALLOW_COPY_AND_ASSIGN(Client);
+  EventLoop *loop_;
+  EventLoopThreadPool thread_pool_;
+  int session_count_;
+  int timeout_;
+  std::vector<std::unique_ptr<Session>> sessions_;
+  std::string message_;
+  std::atomic_int32_t num_connected_;
+  std::unique_ptr<EpollTimer> timeout_timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(Client);
 };
 
 void Session::onConnection(const TCPConnectionPtr &conn) {
